@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Raiku Run</title>
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="ui-layer">
+        SCORE: <span id="score">0</span> / <span id="max-score">200</span>
+        <span id="high-score">BEST: 0</span>
+    </div>
+
+    <button id="mute-btn" onclick="toggleMute()">🔊</button>
+    <div id="countdown">3</div>
+    
+    <div id="start-screen">
+        <img src="img/raiku.png" class="menu-logo" alt="Raiku Logo">
+        <div class="glitch-title">FINAL RUN</div>
+        <div class="subtitle">COLLECT TOKENS. DODGE BLOCKS.</div>
+        <button class="game-btn" onclick="initiateGame()">START</button>
+        
+        <div class="creator-credit">
+            Banger <a href="https://x.com/kersa1n" target="_blank">@kersa1n</a>
+        </div>
+    </div>
+
+    <div id="overlay">
+        <h1>U ARE NOT CHAD</h1>
+        <p id="final-score-text">Score: 0</p>
+        <button id="restart-btn" class="game-btn" onclick="location.reload()">TRY AGAIN</button>
+    </div>
+
+    <div id="portal-visual">
+        <div class="vortex"></div>
+        <div id="win-message">
+            <img src="img/raikufnd.jpg" id="end-logo" alt="Raiku Logo">
+            <h2 id="end-text">WELCOME RAIKU FOUNDATION</h2>
+        </div>
+        <div id="troll-message">
+            <img src="img/therenoairdrop.png" id="troll-img" alt="No Airdrop">
+        </div>
+    </div>
+    <div id="white-flash"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
