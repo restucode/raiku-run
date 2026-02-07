@@ -1,8 +1,3 @@
-/**
- * RAIKU RUN - MOBILE PERFORMANCE OPTIMIZED
- * Features: Object Pooling, Shared Geometries, Delta Time Movement
- */
-
 const CONFIG = {
     laneWidth: 3.5,
     maxScore: 300,
@@ -26,17 +21,23 @@ const OBSTACLE_FILES = [
 
 let isMuted = false;
 
-// --- AUDIO SETUP ---
 const audioIntro = new Audio('sfx/firstmusic.mp3');
-audioIntro.loop = true; audioIntro.volume = 0.5;
+audioIntro.loop = true;
+audioIntro.volume = 0.5;
+
 const audioRun = new Audio('sfx/run.mp3');
-audioRun.loop = true; audioRun.volume = 0.5;
+audioRun.loop = true;
+audioRun.volume = 0.5;
+
 const audioCrash = new Audio('sfx/gameover.mp3');
 audioCrash.volume = 0.8;
+
 const audioTeleport = new Audio('sfx/teleport.mp3');
 audioTeleport.volume = 1.0;
+
 const audioNoAirdrop = new Audio('sfx/noairdrop.mp3');
 audioNoAirdrop.volume = 1.0;
+
 const audioCoin = new Audio('sfx/coin.mp3');
 audioCoin.volume = 0.6;
 
@@ -45,28 +46,22 @@ function toggleMute() {
     document.getElementById('mute-btn').innerHTML = isMuted ? "🔇" : "🔊";
     const allAudios = [audioIntro, audioRun, audioCrash, audioTeleport, audioNoAirdrop, audioCoin];
     allAudios.forEach(a => a.muted = isMuted);
-    if (!isMuted && !isGameActive && audioIntro.paused) audioIntro.play();
+    
+    if (!isMuted && !isGameActive && audioIntro.paused) {
+        audioIntro.play();
+    }
 }
 
-// --- GLOBAL VARIABLES ---
-let scene, camera, renderer, clock;
+let scene, camera, renderer;
 let player, shadowMesh, floorMesh, dirLight;
-// Active objects lists
 let obstacles = [], coins = [], scenery = [], speedLines = [], particles = [];
-// Pools (Recycled objects)
-let obstaclePool = [], coinPool = [], sceneryPool = [], particlePool = [];
-// Resources
-let obstacleMaterials = []; // Pre-created materials
 let loadedObstacleTextures = [];
-let sharedObstacleGeo, sharedCoinGeo, sharedInnerCoinGeo, sharedSceneryGeo;
-let sharedCoinMat, sharedInnerCoinMat, sharedSceneryMat;
-
 let score = 0;
 let isGameActive = false;
 let isGameOver = false;
 let isWon = false;
 let currentLane = 0;
-let gameSpeed = 35; // Speed in units per second
+let gameSpeed = 0.6;
 let highScore = localStorage.getItem('raikuHighScore') || 0;
 let shakeIntensity = 0;
 let laneDeck = [];
@@ -80,8 +75,6 @@ function shuffleDeck() {
 }
 
 function init() {
-    clock = new THREE.Clock();
-
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
     scene.fog = new THREE.FogExp2(0x000000, 0.03);
@@ -90,19 +83,9 @@ function init() {
     camera.position.set(0, 5, 9);
     camera.lookAt(0, 1, -10);
 
-    // PERFORMANCE: Limit pixel ratio for mobile to avoid lag
-    const pixelRatio = Math.min(window.devicePixelRatio, 2);
-    // Disable antialias on high-res screens to save GPU
-    const useAntialias = pixelRatio < 2;
-
-    renderer = new THREE.WebGLRenderer({ 
-        antialias: useAntialias, 
-        alpha: true, 
-        powerPreference: "high-performance",
-        precision: "mediump" // Sufficient for mobile
-    });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(pixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     document.body.appendChild(renderer.domElement);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.8);
@@ -112,12 +95,15 @@ function init() {
     dirLight.position.set(0, 10, 5);
     scene.add(dirLight);
 
-    // Floor
     const gridCanvas = document.createElement('canvas');
-    gridCanvas.width = 64; gridCanvas.height = 64;
+    gridCanvas.width = 64;
+    gridCanvas.height = 64;
     const ctx = gridCanvas.getContext('2d');
-    ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, 64, 64);
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.strokeRect(0, 0, 64, 64);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, 64, 64);
     
     const gridTexture = new THREE.CanvasTexture(gridCanvas);
     gridTexture.wrapS = THREE.RepeatWrapping;
@@ -130,11 +116,9 @@ function init() {
     floorMesh.rotation.x = -Math.PI / 2;
     scene.add(floorMesh);
 
-    // Initialize Shared Resources (Optimization)
-    initSharedResources();
-
     createPlayer();
     createSpeedLines();
+    preloadObstacleTextures();
     shuffleDeck();
 
     document.addEventListener('keydown', onKeyDown);
@@ -145,72 +129,18 @@ function init() {
     document.getElementById('high-score').innerText = "BEST: " + highScore;
     updateThemeColor();
 
-    // Interaction to unlock audio
-    const unlockAudio = () => {
-        if(!isGameActive && !isMuted) audioIntro.play().catch(()=>{});
-        document.removeEventListener('click', unlockAudio);
-        document.removeEventListener('touchstart', unlockAudio);
-    };
-    document.addEventListener('click', unlockAudio);
-    document.addEventListener('touchstart', unlockAudio);
+    audioIntro.play().catch(() => {
+        const unlockAudio = () => {
+            if(!isGameActive && !isMuted) audioIntro.play();
+            document.removeEventListener('click', unlockAudio);
+            document.removeEventListener('touchstart', unlockAudio);
+        };
+        document.addEventListener('click', unlockAudio);
+        document.addEventListener('touchstart', unlockAudio);
+    });
 
     animate();
 }
-
-// --- OPTIMIZATION: PRE-ALLOCATE MEMORY ---
-function initSharedResources() {
-    // 1. Geometries
-    sharedObstacleGeo = new THREE.PlaneGeometry(2, 2);
-    sharedCoinGeo = new THREE.OctahedronGeometry(0.5);
-    sharedInnerCoinGeo = new THREE.OctahedronGeometry(0.4);
-    sharedSceneryGeo = new THREE.BoxGeometry(2, 1, 2); // Height will be scaled
-
-    // 2. Static Materials
-    sharedCoinMat = new THREE.MeshBasicMaterial({ color: 0xffeb3b, wireframe: true });
-    sharedInnerCoinMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
-    sharedSceneryMat = new THREE.LineBasicMaterial({ color: 0xffffff });
-
-    // 3. Load Obstacle Textures & Create Materials immediately
-    const loader = new THREE.TextureLoader();
-    let loadedCount = 0;
-    OBSTACLE_FILES.forEach(filename => {
-        loader.load('assets/' + filename, (tex) => {
-            tex.minFilter = THREE.LinearFilter;
-            tex.generateMipmaps = false; // Save memory
-            loadedObstacleTextures.push(tex);
-            
-            // Create a material for this texture and store it
-            const mat = new THREE.MeshBasicMaterial({ 
-                map: tex, 
-                transparent: true, 
-                side: THREE.DoubleSide, 
-                alphaTest: 0.1 
-            });
-            obstacleMaterials.push(mat);
-            loadedCount++;
-        });
-    });
-}
-
-// --- POOLING SYSTEM ---
-function getFromPool(pool, createFn) {
-    if (pool.length > 0) {
-        const obj = pool.pop();
-        obj.visible = true;
-        return obj;
-    }
-    return createFn();
-}
-
-function returnToPool(obj, pool, list) {
-    obj.visible = false;
-    pool.push(obj);
-    // Remove from active list
-    const index = list.indexOf(obj);
-    if (index > -1) list.splice(index, 1);
-}
-
-// --- GAME LOGIC ---
 
 window.initiateGame = function() {
     audioIntro.pause();
@@ -220,9 +150,11 @@ window.initiateGame = function() {
     let count = 3;
     const interval = setInterval(() => {
         count--;
-        if (count > 0) countdownEl.innerText = count;
-        else if (count === 0) countdownEl.innerText = "GO!";
-        else {
+        if (count > 0) {
+            countdownEl.innerText = count;
+        } else if (count === 0) {
+            countdownEl.innerText = "GO!";
+        } else {
             clearInterval(interval);
             countdownEl.style.display = 'none';
             startGame();
@@ -231,10 +163,9 @@ window.initiateGame = function() {
 };
 
 function startGame() {
-    if (!isMuted) audioRun.play().catch(e => {});
+    if (!isMuted) audioRun.play().catch(e => console.log("Audio play failed:", e));
     document.getElementById('ui-layer').style.display = 'block';
     isGameActive = true;
-    clock.start();
     spawnLoop();
     spawnSceneryLoop();
 }
@@ -249,11 +180,19 @@ function updateThemeColor() {
 
     if (floorMesh) floorMesh.material.color.copy(currentThemeColor);
     if (dirLight) dirLight.color.copy(currentThemeColor);
-    if (sharedSceneryMat) sharedSceneryMat.color.copy(currentThemeColor);
-    
     document.getElementById('ui-layer').style.color = '#' + currentThemeColor.getHexString();
     document.getElementById('ui-layer').style.textShadow = `0 0 10px #${currentThemeColor.getHexString()}`;
     document.documentElement.style.setProperty('--main-color', '#' + currentThemeColor.getHexString());
+}
+
+function preloadObstacleTextures() {
+    const loader = new THREE.TextureLoader();
+    OBSTACLE_FILES.forEach(filename => {
+        loader.load('assets/' + filename, (tex) => {
+            tex.minFilter = THREE.LinearFilter;
+            loadedObstacleTextures.push(tex);
+        });
+    });
 }
 
 function createPlayer() {
@@ -279,7 +218,7 @@ function createPlayer() {
 }
 
 function createSpeedLines() {
-    const count = 120; // Reduced slightly for mobile
+    const count = 150;
     const geo = new THREE.BufferGeometry();
     const pos = [];
     for (let i = 0; i < count; i++) {
@@ -294,7 +233,7 @@ function createSpeedLines() {
 
 function spawnLoop() {
     if (!isGameActive || isGameOver || isWon) return;
-    if (obstacleMaterials.length === 0) {
+    if (loadedObstacleTextures.length === 0) {
         setTimeout(spawnLoop, 100);
         return;
     }
@@ -322,39 +261,8 @@ function spawnLoop() {
         }
     }
 
-    let delay = Math.max(500, 1100 - (score * 4)); 
+    let delay = Math.max(500, 1100 - (score * 6));
     setTimeout(spawnLoop, delay);
-}
-
-function spawnSpecificObstacle(lane) {
-    const ob = getFromPool(obstaclePool, () => {
-        // Create new mesh only if pool empty
-        const mesh = new THREE.Mesh(sharedObstacleGeo, obstacleMaterials[0]); 
-        scene.add(mesh);
-        return mesh;
-    });
-
-    // Pick random material from pre-loaded list
-    const randomMat = obstacleMaterials[Math.floor(Math.random() * obstacleMaterials.length)];
-    ob.material = randomMat;
-    
-    ob.position.set(lane * CONFIG.laneWidth, 1, -80);
-    obstacles.push(ob);
-}
-
-function spawnCoin(lane) {
-    const coin = getFromPool(coinPool, () => {
-        const c = new THREE.Mesh(sharedCoinGeo, sharedCoinMat);
-        const inner = new THREE.Mesh(sharedInnerCoinGeo, sharedInnerCoinMat);
-        c.add(inner);
-        scene.add(c);
-        return c;
-    });
-
-    coin.position.set(lane * CONFIG.laneWidth, 1.5, -80);
-    coin.rotation.set(0,0,0);
-    coin.lane = lane;
-    coins.push(coin);
 }
 
 function spawnSceneryLoop() {
@@ -364,18 +272,38 @@ function spawnSceneryLoop() {
 }
 
 function spawnSideBuilding() {
-    const line = getFromPool(sceneryPool, () => {
-        const edges = new THREE.EdgesGeometry(sharedSceneryGeo);
-        const l = new THREE.LineSegments(edges, sharedSceneryMat);
-        scene.add(l);
-        return l;
-    });
-
     const h = Math.random() * 5 + 2;
-    line.scale.set(1, h, 1); // Scale instead of new geometry
+    const geo = new THREE.BoxGeometry(2, h, 2);
+    const edges = new THREE.EdgesGeometry(geo);
+    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: currentThemeColor }));
     const xPos = Math.random() > 0.5 ? 15 : -15;
     line.position.set(xPos, h / 2 - 2, -100);
+    scene.add(line);
     scenery.push(line);
+}
+
+function spawnSpecificObstacle(lane) {
+    const randomTex = loadedObstacleTextures[Math.floor(Math.random() * loadedObstacleTextures.length)];
+    const geo = new THREE.PlaneGeometry(2, 2);
+    const mat = new THREE.MeshBasicMaterial({ map: randomTex, transparent: true, side: THREE.DoubleSide, alphaTest: 0.1 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(lane * CONFIG.laneWidth, 1, -80);
+    scene.add(mesh);
+    obstacles.push(mesh);
+}
+
+function spawnCoin(lane) {
+    const geo = new THREE.OctahedronGeometry(0.5);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffeb3b, wireframe: true });
+    const coin = new THREE.Mesh(geo, mat);
+    const innerGeo = new THREE.OctahedronGeometry(0.4);
+    const innerMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+    const inner = new THREE.Mesh(innerGeo, innerMat);
+    coin.add(inner);
+    coin.position.set(lane * CONFIG.laneWidth, 1.5, -80);
+    coin.lane = lane;
+    scene.add(coin);
+    coins.push(coin);
 }
 
 function showScorePopup(val) {
@@ -389,8 +317,7 @@ function showScorePopup(val) {
 }
 
 function createExplosion(pos) {
-    // Simple particle explosion without pooling (rare event)
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
         const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
         const mat = new THREE.MeshBasicMaterial({ color: currentThemeColor });
         const p = new THREE.Mesh(geo, mat);
@@ -407,11 +334,8 @@ function createExplosion(pos) {
     }
 }
 
-// --- MAIN UPDATE LOOP ---
 function update() {
     updateThemeColor();
-    const dt = clock.getDelta(); // Delta time in seconds
-    const moveDist = gameSpeed * dt; // Smooth movement calculation
 
     if (shakeIntensity > 0) {
         camera.position.x += (Math.random() - 0.5) * shakeIntensity;
@@ -420,109 +344,103 @@ function update() {
     }
 
     if (!isGameActive) {
-        if (floorMesh) floorMesh.material.map.offset.y -= 0.3 * dt;
+        if (floorMesh) floorMesh.material.map.offset.y -= 0.005;
         camera.position.x = Math.sin(Date.now() * 0.001) * 0.5;
         camera.lookAt(0, 1, -10);
         return;
     }
 
-    // Particles
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
         p.position.add(p.userData.vel);
-        p.rotation.x += 6.0 * dt;
-        p.scale.multiplyScalar(0.9);
+        p.rotation.x += 0.1;
+        p.scale.multiplyScalar(0.95);
         if (p.scale.x < 0.01) {
-            scene.remove(p); // Remove particles completely (rare enough)
+            scene.remove(p);
             particles.splice(i, 1);
         }
     }
 
     if (isGameOver) return;
-    if (!isWon) floorMesh.material.map.offset.y -= (moveDist * 0.05);
+    if (!isWon) floorMesh.material.map.offset.y -= (gameSpeed * 0.05);
 
-    // Player Movement
     if (player) {
         const targetX = currentLane * CONFIG.laneWidth;
-        // Smooth Damping
-        player.position.x = THREE.MathUtils.damp(player.position.x, targetX, 15, dt);
+        player.position.x += (targetX - player.position.x) * 0.2;
         player.rotation.z = -(player.position.x - targetX) * 0.1;
         player.position.y = 1 + Math.sin(Date.now() * 0.015) * 0.1;
-        
         if (shadowMesh) {
             shadowMesh.position.x = player.position.x;
             const scale = 1 - (player.position.y - 1) * 0.4;
             shadowMesh.scale.set(scale, scale, 1);
         }
-        
         const idealCamX = player.position.x * 0.4;
-        camera.position.x = THREE.MathUtils.damp(camera.position.x, idealCamX, 5, dt);
+        camera.position.x += (idealCamX - camera.position.x) * 0.05;
         camera.lookAt(player.position.x * 0.15, 1, -10);
     }
 
-    // Speed Lines
     speedLines.forEach(p => {
-        p.position.z += moveDist * 2;
+        p.position.z += gameSpeed * 2;
         if (p.position.z > 20) p.position.z = -50;
     });
 
-    // Scenery
     for (let i = scenery.length - 1; i >= 0; i--) {
         let b = scenery[i];
-        b.position.z += moveDist;
+        b.position.z += gameSpeed;
+        b.material.color.copy(currentThemeColor);
         if (b.position.z > 10) {
-            returnToPool(b, sceneryPool, scenery);
+            scene.remove(b);
+            scenery.splice(i, 1);
         }
     }
 
-    // Coins
     for (let i = coins.length - 1; i >= 0; i--) {
         let c = coins[i];
-        c.position.z += moveDist;
-        c.rotation.y += 3.0 * dt;
-        
-        // Collision
+        c.position.z += gameSpeed;
+        c.rotation.y += 0.05;
         if (c.position.z > -1 && c.position.z < 1) {
             if (Math.abs(c.position.x - (player ? player.position.x : 0)) < 1.0) {
-                if (!isMuted) { audioCoin.currentTime = 0; audioCoin.play(); }
+                if (!isMuted) {
+                    audioCoin.currentTime = 0;
+                    audioCoin.play();
+                }
                 score += 20;
                 document.getElementById('score').innerText = score;
                 showScorePopup(20);
-                returnToPool(c, coinPool, coins);
+                scene.remove(c);
+                coins.splice(i, 1);
                 checkWin();
                 continue;
             }
         }
         if (c.position.z > 5) {
-            returnToPool(c, coinPool, coins);
+            scene.remove(c);
+            coins.splice(i, 1);
         }
     }
 
-    // Obstacles
     for (let i = obstacles.length - 1; i >= 0; i--) {
         let ob = obstacles[i];
-        ob.position.z += moveDist;
-        
-        // Collision
+        ob.position.z += gameSpeed;
         if (ob.position.z > -1 && ob.position.z < 1) {
             if (Math.abs(ob.position.x - (player ? player.position.x : 0)) < 1.0) {
                 gameOver();
             }
         }
         if (ob.position.z > 5) {
-            returnToPool(ob, obstaclePool, obstacles);
+            scene.remove(ob);
+            obstacles.splice(i, 1);
             if (!isGameOver && !isWon) {
                 score += 10;
                 document.getElementById('score').innerText = score;
-                if (gameSpeed < 85) gameSpeed += 0.5;
+                if (gameSpeed < 1.5) gameSpeed += 0.005;
                 checkWin();
             }
         }
     }
-
     if (isWon && player) {
-        player.position.z -= 10 * dt;
-        player.position.y += 2 * dt;
+        player.position.z -= 0.5;
+        player.position.y += 0.05;
         player.scale.multiplyScalar(0.98);
         if (shadowMesh) shadowMesh.visible = false;
     }
@@ -548,11 +466,12 @@ function triggerPortalEffect() {
     audioRun.pause();
     if (!isMuted) audioTeleport.play();
 
-    // Clear active objects immediately
-    obstacles.forEach(ob => ob.visible = false);
-    coins.forEach(c => c.visible = false);
-    scenery.forEach(s => s.visible = false);
-    obstacles = []; coins = []; scenery = [];
+    obstacles.forEach(ob => scene.remove(ob));
+    obstacles = [];
+    coins.forEach(c => scene.remove(c));
+    coins = [];
+    scenery.forEach(s => scene.remove(s));
+    scenery = [];
 
     const portal = document.getElementById('portal-visual');
     portal.style.opacity = '1';
@@ -575,8 +494,11 @@ function gameOver() {
     createExplosion(player.position);
     player.visible = false;
     shadowMesh.visible = false;
+
     shakeIntensity = 0.5;
-    audioRun.pause(); audioRun.currentTime = 0;
+
+    audioRun.pause();
+    audioRun.currentTime = 0;
     if (!isMuted) audioCrash.play();
     isGameOver = true;
     saveHighScore();
@@ -600,38 +522,32 @@ function onKeyDown(e) {
     if (e.key === 'ArrowRight' || e.key === 'd') if (currentLane < 1) currentLane++;
 }
 
-// --- IMPROVED TOUCH HANDLING ---
 function setupTouch() {
     let startX = 0;
-    let isSwiping = false;
+    let startY = 0;
 
     document.addEventListener('touchstart', e => {
         startX = e.changedTouches[0].screenX;
-        isSwiping = false;
+        startY = e.changedTouches[0].screenY;
     }, { passive: false });
 
     document.addEventListener('touchmove', e => {
-        if (!isGameActive || isGameOver) return;
-        e.preventDefault();
-
-        if (isSwiping) return;
-
-        const currentX = e.changedTouches[0].screenX;
-        const diffX = currentX - startX;
-        const threshold = 30;
-
-        if (Math.abs(diffX) > threshold) {
-            if (diffX > 0 && currentLane < 1) {
-                currentLane++;
-                isSwiping = true;
-            } else if (diffX < 0 && currentLane > -1) {
-                currentLane--;
-                isSwiping = true;
-            }
+        if (isGameActive && !isGameOver) {
+            e.preventDefault();
         }
     }, { passive: false });
 
-    document.addEventListener('touchend', () => isSwiping = false);
+    document.addEventListener('touchend', e => {
+        if (!isGameActive || isGameOver) return;
+
+        const endX = e.changedTouches[0].screenX;
+        const diffX = endX - startX;
+
+        if (Math.abs(diffX) > 30) {
+            if (diffX > 0 && currentLane < 1) currentLane++;
+            else if (diffX < 0 && currentLane > -1) currentLane--;
+        }
+    }, { passive: false });
 }
 
 function onResize() {
